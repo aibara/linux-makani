@@ -20,6 +20,8 @@
 #include <linux/i2c/at24.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
+#include <linux/spi/spi.h>
+#include <linux/spi/flash.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -42,6 +44,7 @@
 #define ON_BD_USB_DRV	GPIO_TO_PIN(1, 15)
 #define ON_BD_USB_OVC	GPIO_TO_PIN(2, 4)
 
+#ifdef MAKANI_DA830_USB
 static const short da830_evm_usb11_pins[] = {
 	DA830_GPIO1_15, DA830_GPIO2_4,
 	-1
@@ -185,11 +188,13 @@ static __init void da830_evm_usb_init(void)
 		pr_warning("%s: USB 1.1 registration failed: %d\n",
 			   __func__, ret);
 }
+#endif
 
 static struct davinci_uart_config da830_evm_uart_config __initdata = {
 	.enabled_uarts = 0x7,
 };
 
+#ifdef MAKANI_DA830_MCASP
 static const short da830_evm_mcasp1_pins[] = {
 	DA830_AHCLKX1, DA830_ACLKX1, DA830_AFSX1, DA830_AHCLKR1, DA830_AFSR1,
 	DA830_AMUTE1, DA830_AXR1_0, DA830_AXR1_1, DA830_AXR1_2, DA830_AXR1_5,
@@ -216,6 +221,7 @@ static struct snd_platform_data da830_evm_snd_data = {
 	.txnumevt	= 1,
 	.rxnumevt	= 1,
 };
+#endif
 
 /*
  * GPIO2[1] is used as MMC_SD_WP and GPIO2[2] as MMC_SD_INS.
@@ -224,21 +230,29 @@ static const short da830_evm_mmc_sd_pins[] = {
 	DA830_MMCSD_DAT_0, DA830_MMCSD_DAT_1, DA830_MMCSD_DAT_2,
 	DA830_MMCSD_DAT_3, DA830_MMCSD_DAT_4, DA830_MMCSD_DAT_5,
 	DA830_MMCSD_DAT_6, DA830_MMCSD_DAT_7, DA830_MMCSD_CLK,
-	DA830_MMCSD_CMD,   DA830_GPIO2_1,     DA830_GPIO2_2,
-	-1
+	DA830_MMCSD_CMD,   DA830_GPIO0_12,    DA830_GPIO0_13,
+	DA830_GPIO0_15, -1
 };
 
-#define DA830_MMCSD_WP_PIN		GPIO_TO_PIN(2, 1)
+#define DA830_MMCSD_WP_PIN		GPIO_TO_PIN(0, 12)
+#define DA830_MMCSD_CD_PIN		GPIO_TO_PIN(0, 13)
+#define DA830_SD_FLASH_PIN		GPIO_TO_PIN(0, 15)
 
 static int da830_evm_mmc_get_ro(int index)
 {
 	return gpio_get_value(DA830_MMCSD_WP_PIN);
 }
 
+static int da830_evm_mmc_get_cd(int index)
+{
+	return !gpio_get_value(DA830_MMCSD_CD_PIN);
+}
+
 static struct davinci_mmc_config da830_evm_mmc_config = {
 	.get_ro			= da830_evm_mmc_get_ro,
+	.get_cd			= da830_evm_mmc_get_cd,
 	.wires			= 4,
-	.max_freq		= 50000000,
+	.max_freq		= 25000000,
 	.caps			= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED,
 	.version		= MMC_CTLR_VERSION_2,
 };
@@ -262,11 +276,32 @@ static inline void da830_evm_init_mmc(void)
 	}
 	gpio_direction_input(DA830_MMCSD_WP_PIN);
 
+	ret = gpio_request(DA830_MMCSD_CD_PIN, "MMC CD");
+	if (ret) {
+		pr_warning("da830_evm_init: can not open GPIO %d\n",
+			   DA830_MMCSD_CD_PIN);
+		gpio_free(DA830_MMCSD_WP_PIN);
+		return;
+	}
+	gpio_direction_input(DA830_MMCSD_CD_PIN);
+
+	// Set the SD/FLASH# select put to HIGH
+	ret = gpio_request(DA830_SD_FLASH_PIN, "MMC SD FLASH\n");
+	if (ret) {
+		pr_warning("da830_evm_init: can not open GPIO %d\n",
+			   DA830_SD_FLASH_PIN);
+		gpio_free(DA830_SD_FLASH_PIN);
+		return;
+	}
+	gpio_direction_output(DA830_SD_FLASH_PIN, 0);
+	gpio_set_value(DA830_SD_FLASH_PIN, 1);
+
 	ret = da8xx_register_mmcsd0(&da830_evm_mmc_config);
 	if (ret) {
 		pr_warning("da830_evm_init: mmc/sd registration failed: %d\n",
 				ret);
 		gpio_free(DA830_MMCSD_WP_PIN);
+		gpio_free(DA830_MMCSD_CD_PIN);
 	}
 }
 
@@ -294,27 +329,34 @@ static const short da830_evm_emif25_pins[] = {
 static struct mtd_partition da830_evm_nand_partitions[] = {
 	/* bootloader (U-Boot, etc) in first sector */
 	[0] = {
-		.name		= "bootloader",
+		.name		= "u-boot env",
 		.offset		= 0,
 		.size		= SZ_128K,
 		.mask_flags	= MTD_WRITEABLE,	/* force read-only */
 	},
-	/* bootloader params in the next sector */
+	/* primary bootloader in the next sector */
 	[1] = {
-		.name		= "params",
+		.name		= "UBL",
 		.offset		= MTDPART_OFS_APPEND,
 		.size		= SZ_128K,
 		.mask_flags	= MTD_WRITEABLE,	/* force read-only */
 	},
-	/* kernel */
+	/* bootloader (U-Boot, etc) in next sector */
 	[2] = {
+		.name		= "u-boot",
+		.offset		= MTDPART_OFS_APPEND,
+		.size		= 4 * SZ_128K,
+		.mask_flags	= MTD_WRITEABLE,
+	},
+	/* kernel */
+	[3] = {
 		.name		= "kernel",
 		.offset		= MTDPART_OFS_APPEND,
 		.size		= SZ_2M,
 		.mask_flags	= 0,
 	},
 	/* file system */
-	[3] = {
+	[4] = {
 		.name		= "filesystem",
 		.offset		= MTDPART_OFS_APPEND,
 		.size		= MTDPART_SIZ_FULL,
@@ -407,6 +449,63 @@ static inline void da830_evm_init_nand(int mux_mode)
 static inline void da830_evm_init_nand(int mux_mode) { }
 #endif
 
+static struct mtd_partition spi_flash_partitions[] = {
+	[0] = {
+		.name = "U-Boot",
+		.offset = 0,
+		.size = SZ_256K,
+		.mask_flags = MTD_WRITEABLE,
+	},
+	[1] = {
+		.name = "U-Boot Environment",
+		.offset = MTDPART_OFS_APPEND,
+		.size = SZ_64K,
+		.mask_flags = MTD_WRITEABLE,
+	},
+	[2] = {
+		.name = "Linux",
+		.offset = MTDPART_OFS_NXTBLK,
+		.size = SZ_4M - SZ_256K - SZ_64K - SZ_64K,
+		.mask_flags = 0,
+	},
+	[3] = {
+		.name = "MAC Address",
+		.offset = MTDPART_OFS_NXTBLK,
+		.size = SZ_64K,
+		.mask_flags = 0,
+		.setup = davinci_get_mac_addr,
+		.context = (void *)0,
+	},
+};
+
+static struct flash_platform_data spi_flash_data = {
+	.name = "m25p80",
+	.parts = spi_flash_partitions,
+	.nr_parts = ARRAY_SIZE(spi_flash_partitions),
+	.type = "sst25vf032b",
+};
+
+static struct spi_board_info da830_spi0_board_info[] = {
+	[0] = {
+		.modalias = "m25p80",
+		.platform_data = &spi_flash_data,
+		.mode = SPI_MODE_0,
+		.max_speed_hz = 30000000,       /* max sample rate at 3V */
+		.bus_num = 0,
+		.chip_select = 0,
+	},
+};
+
+static struct spi_board_info da830_spi1_board_info[] = {
+	[0] = {
+		//.modalias = "makani_fpga",
+		.modalias = "spidev",
+		.mode = SPI_MODE_0,
+		.max_speed_hz = 5000000,       /* max sample rate at 3V */
+		.bus_num = 1,
+		.chip_select = 0,
+	},
+};
 #ifdef CONFIG_DA830_UI_LCD
 static inline void da830_evm_init_lcdc(int mux_mode)
 {
@@ -427,6 +526,7 @@ static inline void da830_evm_init_lcdc(int mux_mode)
 static inline void da830_evm_init_lcdc(int mux_mode) { }
 #endif
 
+#ifdef MAKANI_DA830_I2C0
 static struct at24_platform_data da830_evm_i2c_eeprom_info = {
 	.byte_len	= SZ_256K / 8,
 	.page_size	= 64,
@@ -481,6 +581,7 @@ static struct davinci_i2c_platform_data da830_evm_i2c_0_pdata = {
 	.bus_freq	= 100,	/* kHz */
 	.bus_delay	= 0,	/* usec */
 };
+#endif
 
 static __init void da830_evm_init(void)
 {
@@ -491,7 +592,7 @@ static __init void da830_evm_init(void)
 	if (ret)
 		pr_warning("da830_evm_init: edma registration failed: %d\n",
 				ret);
-
+#ifdef MAKANI_DA830_I2C0
 	ret = da8xx_pinmux_setup(da830_i2c0_pins);
 	if (ret)
 		pr_warning("da830_evm_init: i2c0 mux setup failed: %d\n",
@@ -501,8 +602,10 @@ static __init void da830_evm_init(void)
 	if (ret)
 		pr_warning("da830_evm_init: i2c0 registration failed: %d\n",
 				ret);
-
+#endif
+#ifdef MAKANI_DA830_USB
 	da830_evm_usb_init();
+#endif
 
 	soc_info->emac_pdata->phy_mask = DA830_EVM_PHY_MASK;
 	soc_info->emac_pdata->mdio_max_freq = DA830_EVM_MDIO_FREQUENCY;
@@ -524,21 +627,42 @@ static __init void da830_evm_init(void)
 				ret);
 
 	davinci_serial_init(&da830_evm_uart_config);
+#ifdef MAKANI_DA830_I2C0
 	i2c_register_board_info(1, da830_evm_i2c_devices,
 			ARRAY_SIZE(da830_evm_i2c_devices));
+#endif
 
+#ifdef MAKANI_DA830_MCASP
 	ret = da8xx_pinmux_setup(da830_evm_mcasp1_pins);
 	if (ret)
 		pr_warning("da830_evm_init: mcasp1 mux setup failed: %d\n",
 				ret);
 
 	da8xx_register_mcasp(1, &da830_evm_snd_data);
+#endif
 
 	da830_evm_init_mmc();
 
 	ret = da8xx_register_rtc();
 	if (ret)
 		pr_warning("da830_evm_init: rtc setup failed: %d\n", ret);
+
+  ret = da8xx_pinmux_setup(da830_spi0_pins);
+	if (ret)
+		pr_warning("da830_evm_init: spi0 mux setup failed: %d\n",
+				ret);
+
+	da830_init_spi0(BIT(0), da830_spi0_board_info,
+			ARRAY_SIZE(da830_spi0_board_info));
+
+	ret = da8xx_pinmux_setup(da830_spi1_pins);
+	if (ret)
+		pr_warning("da830_evm_init: spi1 mux setup failed: %d\n",
+				ret);
+
+	da830_init_spi1(BIT(0), da830_spi1_board_info,
+			ARRAY_SIZE(da830_spi1_board_info));
+
 }
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE

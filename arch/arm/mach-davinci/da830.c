@@ -396,8 +396,8 @@ static struct clk_lookup da830_clks[] = {
 	CLK(NULL,		"uart0",	&uart0_clk),
 	CLK(NULL,		"uart1",	&uart1_clk),
 	CLK(NULL,		"uart2",	&uart2_clk),
-	CLK("dm_spi.0",		NULL,		&spi0_clk),
-	CLK("dm_spi.1",		NULL,		&spi1_clk),
+	CLK("spi_davinci.0",		NULL,		&spi0_clk),
+	CLK("spi_davinci.1",		NULL,		&spi1_clk),
 	CLK(NULL,		"ecap0",	&ecap0_clk),
 	CLK(NULL,		"ecap1",	&ecap1_clk),
 	CLK(NULL,		"ecap2",	&ecap2_clk),
@@ -858,11 +858,16 @@ const short da830_spi0_pins[] __initdata = {
 };
 
 const short da830_spi1_pins[] __initdata = {
+	DA830_SPI1_SOMI_0, DA830_SPI1_SIMO_0, DA830_SPI1_CLK, DA830_NSPI1_SCS_0,
+	-1
+};
+/*
+const short da830_spi1_pins[] __initdata = {
 	DA830_SPI1_SOMI_0, DA830_SPI1_SIMO_0, DA830_SPI1_CLK, DA830_NSPI1_ENA,
 	DA830_NSPI1_SCS_0,
 	-1
 };
-
+*/
 const short da830_mmc_sd_pins[] __initdata = {
 	DA830_MMCSD_DAT_0, DA830_MMCSD_DAT_1, DA830_MMCSD_DAT_2,
 	DA830_MMCSD_DAT_3, DA830_MMCSD_DAT_4, DA830_MMCSD_DAT_5,

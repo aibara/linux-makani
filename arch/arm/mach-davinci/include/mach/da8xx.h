@@ -14,6 +14,8 @@
 #include <video/da8xx-fb.h>
 
 #include <linux/davinci_emac.h>
+#include <linux/spi/spi.h>
+#include <linux/platform_device.h>
 #include <mach/serial.h>
 #include <mach/edma.h>
 #include <mach/i2c.h>
@@ -100,6 +102,10 @@ int da850_register_cpufreq(void);
 int da8xx_register_cpuidle(void);
 void __iomem * __init da8xx_get_mem_ctlr(void);
 int da850_register_pm(struct platform_device *pdev);
+void da830_init_spi0(unsigned chipselect_mask,
+	struct spi_board_info *info, unsigned len);
+void da830_init_spi1(unsigned chipselect_mask,
+	struct spi_board_info *info, unsigned len);
 
 extern struct platform_device da8xx_serial_device;
 extern struct emac_platform_data da8xx_emac_pdata;
