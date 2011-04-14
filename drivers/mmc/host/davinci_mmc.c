@@ -695,6 +695,8 @@ static void mmc_davinci_request(struct mmc_host *mmc, struct mmc_request *req)
 	unsigned long timeout = jiffies + msecs_to_jiffies(900);
 	u32 mmcst1 = 0;
 
+  unsigned long XXX = jiffies;
+
 	/* Card may still be sending BUSY after a previous operation,
 	 * typically some kind of write.  If so, we can't proceed yet.
 	 */
@@ -710,6 +712,9 @@ static void mmc_davinci_request(struct mmc_host *mmc, struct mmc_request *req)
 		mmc_request_done(mmc, req);
 		return;
 	}
+
+  if (jiffies > XXX)
+    dev_dbg(mmc_dev(host->mmc), "Request Jiffies: %lu\n", jiffies - XXX);
 
 	host->do_dma = 0;
 	mmc_davinci_prepare_data(host, req);
@@ -915,6 +920,8 @@ static irqreturn_t mmc_davinci_irq(int irq, void *dev_id)
 	int end_transfer = 0;
 	struct mmc_data *data = host->data;
 
+unsigned long XXX = jiffies;
+
 	if (host->cmd == NULL && host->data == NULL) {
 		status = readl(host->base + DAVINCI_MMCST0);
 		dev_dbg(mmc_dev(host->mmc),
@@ -1028,6 +1035,10 @@ static irqreturn_t mmc_davinci_irq(int irq, void *dev_id)
 		mmc_davinci_cmd_done(host, host->cmd);
 	if (end_transfer)
 		mmc_davinci_xfer_done(host, data);
+
+  if (jiffies > XXX)
+    dev_dbg(mmc_dev(host->mmc), "IRQ Jiffies: %lu\n", jiffies - XXX);
+
 	return IRQ_HANDLED;
 }
 
